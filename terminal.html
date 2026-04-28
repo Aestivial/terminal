@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Terminal Portfolio</title>
+    <style>
+      body,
+      html {
+        margin: 0;
+        padding: 0;
+        background-color: #282a36; /* Dracula dark background */
+        color: #f8f8f2; /* Dracula foreground */
+        font-family: "Menlo", "Monaco", "Courier New", monospace;
+        font-size: 15px;
+        height: 100%;
+        overflow: hidden;
+      }
+      #terminal-container {
+        padding: 30px;
+        height: 100%;
+        box-sizing: border-box;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+      }
+      .line {
+        margin: 4px 0;
+        line-height: 1.6;
+        word-wrap: break-word;
+      }
+      .user-input {
+        color: #50fa7b; /* Dracula green for user input */
+      }
+      .prompt {
+        color: #ff79c6; /* Dracula pink for prompt */
+        font-weight: bold;
+        margin-right: 10px;
+      }
+      .dir-text {
+        color: #8be9fd; /* Dracula cyan for directories */
+        font-weight: bold;
+      }
+      .sys-text {
+        color: #bd93f9; /* Dracula purple for system text */
+      }
+      #input-container {
+        display: flex;
+        align-items: center;
+        margin-top: 5px;
+      }
+      input[type="text"] {
+        background: transparent;
+        border: none;
+        color: #f8f8f2;
+        font-family: inherit;
+        font-size: inherit;
+        flex-grow: 1;
+        outline: none;
+      }
+      ::-webkit-scrollbar {
+        width: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #282a36;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #6272a4;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="terminal-container">
+      <div class="line sys-text">Session starting...</div>
+      <div class="line">Type 'help' to see available commands.</div>
+      <br />
+
+      <div id="output"></div>
+
+      <div id="input-container">
+        <span class="prompt" id="prompt-text">nayan@sys:~$</span>
+        <input
+          type="text"
+          id="command-input"
+          autofocus
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+    </div>
+
+    <script>
+      // --- CONFIGURATION ---
+      // Replace this with your Cloudflare Worker URL
+      const API_URL = "https://nim-proxy.aestivial09.workers.dev";
+      const MODEL = "meta/llama-4-maverick-17b-128e-instruct";
+
+      const inputField = document.getElementById("command-input");
+      const outputDiv = document.getElementById("output");
+      const terminalContainer = document.getElementById("terminal-container");
+      const promptText = document.getElementById("prompt-text");
+
+      // --- STATE & FILESYSTEM ---
+      let agentMode = false;
+      let currentPath = "~";
+
+      const vfs = {
+        "~": {
+          type: "dir",
+          contents: {
+            "about.txt": {
+              type: "file",
+              content: "Just a curious boy who loves tinkering with tech!",
+            },
+            "skills.txt": {
+              type: "file",
+              content: "> Python\n> SQL\n> DBA\n> Shell Scripting\n>",
+            },
+            projects: {
+              type: "dir",
+              contents: {
+                "pet_simulator.js": {
+                  type: "file",
+                  content:
+                    "// Single-file HTML/JS virtual pet simulator\n// Aesthetic: Pastel\nconsole.log('Pet spawned.');",
+                },
+                "compliance_dash.sh": {
+                  type: "file",
+                  content:
+                    "#!/bin/bash\n# Frontend prototype to reduce compliance tax\necho 'Manhours saved.'",
+                },
+              },
+            },
+          },
+        },
+      };
+
+      let currentDirObj = vfs["~"].contents;
+
+      let conversationHistory = [
+        {
+          role: "system",
+          content:
+            "You are 'Snow', an embedded assistant in a terminal, with similar verbosity to Jarvis from IronMan. Be highly technical, concise, and helpful. You are communicating directly with a guest, and youractual owner is Aestivial.",
+        },
+      ];
+
+      document.addEventListener("click", () => inputField.focus());
+
+      inputField.addEventListener("keypress", async function (e) {
+        if (e.key === "Enter") {
+          const rawInput = inputField.value;
+          const inputTrimmed = rawInput.trim();
+          if (!inputTrimmed) return;
+
+          appendLine(
+            `<span class="prompt">${promptText.innerText}</span> <span class="user-input">${rawInput}</span>`,
+          );
+          inputField.value = "";
+
+          if (agentMode) {
+            if (inputTrimmed.toLowerCase() === "exit") {
+              agentMode = false;
+              promptText.innerText = `guest@sys:${currentPath}$`;
+              appendLine(
+                "<span class='sys-text'>[System] Snow disconnected. Returning to standard shell.</span>",
+              );
+              return;
+            }
+            await handleAgentInteraction(inputTrimmed);
+          } else {
+            handleStandardCommand(inputTrimmed);
+          }
+        }
+      });
+
+      function handleStandardCommand(cmdString) {
+        const args = cmdString.split(" ").filter(Boolean);
+        const cmd = args[0].toLowerCase();
+
+        // The hidden trigger evaluation
+        if (cmdString === ["System", "call(Snow)"].join(".")) {
+          agentMode = true;
+          promptText.innerText = "snow@agent:~#";
+          appendLine(
+            "<span class='sys-text'>[System] Boot sequence initiated... Handshake accepted.</span>",
+          );
+          appendLine(
+            "Hello. I am Snow. How can I assist you today? (Type 'exit' to return)",
+          );
+          return;
+        }
+
+        switch (cmd) {
+          case "help":
+            appendLine("Available commands:");
+            appendLine(
+              "  <span class='dir-text'>ls</span>     - List directory contents",
+            );
+            appendLine(
+              "  <span class='dir-text'>cd</span>     - Change directory",
+            );
+            appendLine("  <span class='dir-text'>cat</span>    - Read a file");
+            appendLine(
+              "  <span class='dir-text'>echo</span>   - Print text to terminal",
+            );
+            appendLine(
+              "  <span class='dir-text'>clear</span>  - Clear the terminal screen",
+            );
+            break;
+          case "clear":
+            outputDiv.innerHTML = "";
+            break;
+          case "echo":
+            appendLine(args.slice(1).join(" "));
+            break;
+          case "ls":
+            let lsOutput = [];
+            for (const [key, val] of Object.entries(currentDirObj)) {
+              if (val.type === "dir")
+                lsOutput.push(`<span class="dir-text">${key}/</span>`);
+              else lsOutput.push(key);
+            }
+            appendLine(lsOutput.join("  "));
+            break;
+          case "cd":
+            const targetDir = args[1];
+            if (!targetDir || targetDir === "~") {
+              currentPath = "~";
+              currentDirObj = vfs["~"].contents;
+            } else if (targetDir === "..") {
+              if (currentPath !== "~") {
+                currentPath = "~";
+                currentDirObj = vfs["~"].contents;
+              }
+            } else if (
+              currentDirObj[targetDir] &&
+              currentDirObj[targetDir].type === "dir"
+            ) {
+              currentPath = `${currentPath}/${targetDir}`;
+              currentDirObj = currentDirObj[targetDir].contents;
+            } else {
+              appendLine(`cd: ${targetDir}: No such directory`);
+            }
+            if (!agentMode) promptText.innerText = `nayan@sys:${currentPath}$`;
+            break;
+          case "cat":
+            const targetFile = args[1];
+            if (!targetFile) {
+              appendLine("cat: missing file operand");
+            } else if (
+              currentDirObj[targetFile] &&
+              currentDirObj[targetFile].type === "file"
+            ) {
+              // Replace newlines with <br> for HTML rendering
+              appendLine(
+                currentDirObj[targetFile].content.replace(/\n/g, "<br>"),
+              );
+            } else if (
+              currentDirObj[targetFile] &&
+              currentDirObj[targetFile].type === "dir"
+            ) {
+              appendLine(`cat: ${targetFile}: Is a directory`);
+            } else {
+              appendLine(`cat: ${targetFile}: No such file or directory`);
+            }
+            break;
+          default:
+            appendLine(`${cmd}: command not found`);
+        }
+      }
+
+      async function handleAgentInteraction(userText) {
+        conversationHistory.push({ role: "user", content: userText });
+        const loadingId = appendLine(
+          "<span style='color: #888;'>[processing...]</span>",
+        );
+
+        try {
+          const response = await fetch(API_URL, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: MODEL,
+              messages: conversationHistory,
+              max_tokens: 512,
+              temperature: 0.7,
+            }),
+          });
+
+          removeLine(loadingId);
+
+          if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+
+          const data = await response.json();
+          const aiMessage = data.choices[0].message.content;
+
+          conversationHistory.push({ role: "assistant", content: aiMessage });
+          await typeText(aiMessage);
+        } catch (error) {
+          removeLine(loadingId);
+          appendLine(
+            `<span style='color: #ff5555;'>[Exception] Connection severed: ${error.message}</span>`,
+          );
+        }
+      }
+
+      function appendLine(htmlContent) {
+        const line = document.createElement("div");
+        line.className = "line";
+        line.innerHTML = htmlContent;
+        const id = "line-" + Date.now();
+        line.id = id;
+        outputDiv.appendChild(line);
+        terminalContainer.scrollTop = terminalContainer.scrollHeight;
+        return id;
+      }
+
+      function removeLine(id) {
+        const line = document.getElementById(id);
+        if (line) line.remove();
+      }
+
+      async function typeText(text) {
+        const line = document.createElement("div");
+        line.className = "line sys-text";
+        outputDiv.appendChild(line);
+
+        for (let i = 0; i < text.length; i++) {
+          if (text[i] === "\n") {
+            line.innerHTML += "<br>";
+          } else {
+            line.innerHTML += text[i];
+          }
+          terminalContainer.scrollTop = terminalContainer.scrollHeight;
+          await new Promise((r) => setTimeout(r, 10));
+        }
+      }
+    </script>
+  </body>
+</html>
